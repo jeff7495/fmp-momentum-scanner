@@ -4,29 +4,23 @@ import pandas as pd
 from datetime import datetime
 import yfinance as yf
 
-# === CONFIG ===
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
 NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
+
 PRICE_MIN = 1
 PRICE_MAX = 20
 PERCENT_CHANGE_MIN = 10
 REL_VOL_MIN = 5
-FLOAT_MAX = 10  # in millions
+FLOAT_MAX = 10
 
 @st.cache_data
-def get_top_gainers():
+def get_top_gainers_raw():
     url = f"https://financialmodelingprep.com/api/v3/gainers?apikey={FMP_API_KEY}"
     res = requests.get(url)
     try:
-        data = res.json()
-        if isinstance(data, list):
-            return data
-        else:
-            st.error("FMP API Error: " + str(data))
-            return []
+        return res.json()
     except Exception as e:
-        st.error(f"Failed to parse gainers response: {e}")
-        return []
+        return {"error": f"Failed to decode JSON: {e}"}
 
 @st.cache_data
 def get_float(ticker):
@@ -64,11 +58,13 @@ def get_news(ticker):
         pass
     return None
 
-@st.cache_data
-def scan_fmp_gainers():
-    gainers = get_top_gainers()
+def scan_gainers_safely(raw_data):
     results = []
-    for stock in gainers:
+    if not isinstance(raw_data, list):
+        st.error("FMP API returned unexpected format. See raw output below.")
+        return results
+
+    for stock in raw_data:
         try:
             ticker = stock.get('ticker')
             price = float(stock.get('price', 0))
@@ -100,19 +96,23 @@ def scan_fmp_gainers():
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
         except Exception as e:
-            st.warning(f"Error with ticker: {e}")
+            st.warning(f"Skipped {stock}: {e}")
     return pd.DataFrame(results)
 
 # === STREAMLIT UI ===
-st.title("📊 FMP-Based Momentum Scanner (Ross Cameron Style)")
+st.title("🛠️ Debug Mode: FMP Momentum Scanner")
 
-if st.button("🚀 Scan Top Gainers"):
-    try:
-        df = scan_fmp_gainers()
-        if not df.empty:
-            st.success("Momentum stocks found!")
-            st.dataframe(df)
-        else:
-            st.info("No qualifying stocks found.")
-    except Exception as e:
-        st.error(f"❌ Error scanning gainers: {e}")
+if st.button("🧪 Run Test Scan"):
+    raw = get_top_gainers_raw()
+
+    st.subheader("📦 Raw API Response from FMP")
+    st.json(raw)
+
+    st.subheader("📊 Filtered Momentum Stocks")
+    df = scan_gainers_safely(raw)
+
+    if not df.empty:
+        st.success("Filtered results:")
+        st.dataframe(df)
+    else:
+        st.info("No qualifying stocks found or raw response was not a list.")
