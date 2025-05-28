@@ -15,8 +15,8 @@ FLOAT_MAX = 10
 
 @st.cache_data
 def get_top_gainers():
+    url = f"https://financialmodelingprep.com/api/v3/gainers?apikey={FMP_API_KEY}"
     try:
-        url = f"https://financialmodelingprep.com/api/v3/gainers?apikey={FMP_API_KEY}"
         res = requests.get(url)
         data = res.json()
         return data if isinstance(data, list) else []
@@ -42,15 +42,11 @@ def get_relative_volume(ticker, lookback=20):
         data = yf.download(ticker, period="30d", interval="1d", progress=False)
         if data.empty or "Volume" not in data.columns:
             return 0
-
         vol_series = data["Volume"].dropna()
-
         if vol_series.empty:
             return 0
-
         avg_vol = vol_series[-lookback:].mean()
         latest_vol = vol_series.iloc[-1]
-
         if (
             pd.isna(latest_vol)
             or pd.isna(avg_vol)
@@ -59,11 +55,9 @@ def get_relative_volume(ticker, lookback=20):
             or isinstance(avg_vol, pd.Series)
         ):
             return 0
-
         return latest_vol / avg_vol
     except:
         return 0
-
 
 @st.cache_data
 def get_news(ticker):
@@ -77,10 +71,10 @@ def get_news(ticker):
         pass
     return None
 
-def scan_with_feedback():
+def scan_and_display():
     gainers = get_top_gainers()
-    st.subheader("🔍 Scanning These Gainers")
-    st.write([g.get("ticker") for g in gainers if "ticker" in g])
+    st.subheader("🔍 Gainers Being Scanned")
+    st.code([g.get("ticker") for g in gainers if "ticker" in g])
 
     results = []
     for stock in gainers:
@@ -92,25 +86,20 @@ def scan_with_feedback():
             st.write(f"🧪 Checking {ticker}: Price=${price}, Change={change_pct}%")
 
             if not (PRICE_MIN <= price <= PRICE_MAX):
-                st.write(f"⛔ {ticker} skipped: price out of range")
                 continue
             if change_pct < PERCENT_CHANGE_MIN:
-                st.write(f"⛔ {ticker} skipped: gain < {PERCENT_CHANGE_MIN}%")
                 continue
 
             rvol = get_relative_volume(ticker)
             if rvol < REL_VOL_MIN:
-                st.write(f"⛔ {ticker} skipped: RVOL {round(rvol, 2)} < {REL_VOL_MIN}")
                 continue
 
             float_mil = get_float(ticker)
             if float_mil > FLOAT_MAX:
-                st.write(f"⛔ {ticker} skipped: float {float_mil}M > {FLOAT_MAX}M")
                 continue
 
             headline = get_news(ticker)
             if not headline:
-                st.write(f"⛔ {ticker} skipped: no news found")
                 continue
 
             results.append({
@@ -122,19 +111,40 @@ def scan_with_feedback():
                 "News Headline": headline,
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
-
-            st.success(f"✅ {ticker} PASSED")
         except Exception as e:
-            st.warning(f"⚠️ Error with {ticker}: {e}")
+            st.warning(f"⚠️ Error with {stock.get('ticker')}: {e}")
+
     return pd.DataFrame(results)
 
 # Streamlit UI
-st.title("🔍 FMP Momentum Scanner – Detailed Filter Log")
+st.set_page_config(page_title="Momentum Scanner", layout="wide")
+st.title("📘 GUI Momentum Scanner with TradingView Export")
 
-if st.button("Run Full Scan"):
-    df = scan_with_feedback()
+if st.button("Run Scan"):
+    df = scan_and_display()
     if not df.empty:
-        st.success("Qualifying Stocks Found:")
-        st.dataframe(df)
+        st.success(f"✅ {len(df)} Stocks Passed Filters")
+
+        for _, row in df.iterrows():
+            with st.container():
+                st.markdown(
+                    f'''
+                    <div style="padding:15px; margin:10px 0; border:1px solid #ccc; border-radius:10px;">
+                        <h3>{row['Ticker']} — ${row['Price']} ({row['% Change']}%)</h3>
+                        <p><strong>RVOL:</strong> {row['Relative Volume']} | <strong>Float:</strong> {row['Float (M)']}M</p>
+                        <p><em>News:</em> {row['News Headline']}</p>
+                        <p><small>{row['Timestamp']}</small></p>
+                    </div>
+                    ''',
+                    unsafe_allow_html=True
+                )
+
+        txt_content = "\n".join(df["Ticker"].tolist())
+        st.download_button(
+            label="📤 Export Watchlist to TradingView (.txt)",
+            data=txt_content,
+            file_name="tv_watchlist.txt",
+            mime="text/plain"
+        )
     else:
-        st.info("No stocks passed all filters.")
+        st.info("No qualifying stocks found.")
