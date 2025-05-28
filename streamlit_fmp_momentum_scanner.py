@@ -66,10 +66,11 @@ def get_news(ticker):
         r = requests.get(url)
         articles = r.json().get('articles', [])
         if articles:
-            return articles[0]['title']
+            article = articles[0]
+            return f"[{article['title']}]({article['url']})"
     except:
         pass
-    return None
+    return "N/A"
 
 def scan_pro_style():
     gainers = get_top_gainers()
@@ -79,6 +80,9 @@ def scan_pro_style():
             ticker = stock.get("ticker", "N/A")
             price = float(stock.get("price", 0))
             change_pct = float(stock.get("changesPercentage", "0").replace("%", "").replace("+", ""))
+            previous_close = price / (1 + (change_pct / 100))
+            gap_pct = (price - previous_close) / previous_close * 100 if previous_close else 0
+
             if not (PRICE_MIN <= price <= PRICE_MAX) or change_pct < PERCENT_CHANGE_MIN:
                 continue
             rvol = get_relative_volume(ticker)
@@ -87,19 +91,22 @@ def scan_pro_style():
             float_mil = get_float(ticker)
             if float_mil > FLOAT_MAX:
                 continue
-            news = get_news(ticker)
+            news_link = get_news(ticker)
+
             results.append({
                 "% Change": round(change_pct, 2),
+                "Gap %": round(gap_pct, 2),
                 "Symbol": ticker,
                 "Price": price,
                 "Float (M)": float_mil,
                 "Relative Volume": round(rvol, 2),
-                "News": news or "N/A",
+                "News": news_link,
                 "Time": datetime.now().strftime("%H:%M:%S")
             })
         except Exception as e:
             st.warning(f"Error on {stock.get('ticker')}: {e}")
-    return pd.DataFrame(results).sort_values("% Change", ascending=False)
+    df = pd.DataFrame(results)
+    return df.sort_values("% Change", ascending=False) if not df.empty and "% Change" in df.columns else df
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Pro Momentum Grid", layout="wide")
@@ -110,9 +117,9 @@ if st.button("🚀 Scan Now"):
     if not df.empty:
         st.dataframe(
             df.style
-              .background_gradient(cmap="Greens", subset=["% Change"])
+              .background_gradient(cmap="Greens", subset=["% Change", "Gap %"])
               .background_gradient(cmap="Blues", subset=["Float (M)"])
-              .format({"Price": "${:.2f}", "% Change": "{:.2f}%", "Float (M)": "{:.2f}M", "Relative Volume": "{:.2f}"}),
+              .format({"Price": "${:.2f}", "% Change": "{:.2f}%", "Gap %": "{:.2f}%", "Float (M)": "{:.2f}M", "Relative Volume": "{:.2f}"}),
             use_container_width=True
         )
         st.download_button("💾 Export to CSV", df.to_csv(index=False), "momentum_results.csv")
