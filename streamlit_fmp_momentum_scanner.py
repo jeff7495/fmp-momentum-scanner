@@ -1,127 +1,67 @@
 import streamlit as st
-import requests
 import pandas as pd
+import requests
 from datetime import datetime
-import yfinance as yf
+
+st.set_page_config(page_title="Pro-Style Momentum Scanner Grid", layout="wide")
+st.title("📊 Pro-Style Momentum Scanner Grid")
 
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
-NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
+SHOW_GAP = st.sidebar.checkbox("Show Gap %", value=True)
+SHOW_NEWS = st.sidebar.checkbox("Include News Links", value=True)
 
-PRICE_MIN = 1
-PRICE_MAX = 20
-PERCENT_CHANGE_MIN = 10
-REL_VOL_MIN = 5
-FLOAT_MAX = 10
+def get_gainers():
+    url = f"https://financialmodelingprep.com/api/v3/stock_market/gainers?apikey={FMP_API_KEY}"
+    res = requests.get(url)
+    return res.json() if res.ok else []
 
-@st.cache_data
-def get_top_gainers():
-    url = f"https://financialmodelingprep.com/api/v3/gainers?apikey={FMP_API_KEY}"
-    try:
-        res = requests.get(url)
-        data = res.json()
-        return data if isinstance(data, list) else []
-    except Exception as e:
-        st.error(f"FMP error: {e}")
-        return []
+def get_profile(symbol):
+    url = f"https://financialmodelingprep.com/api/v3/profile/{symbol}?apikey={FMP_API_KEY}"
+    res = requests.get(url)
+    return res.json()[0] if res.ok and res.json() else {}
 
-@st.cache_data
-def get_float(ticker):
-    url = f"https://financialmodelingprep.com/api/v4/float-amount?symbol={ticker}&apikey={FMP_API_KEY}"
-    try:
-        res = requests.get(url)
-        data = res.json()
-        if isinstance(data, list) and data:
-            return round(data[0].get("floatShares", 999_999_999) / 1_000_000, 2)
-    except:
-        pass
-    return 999
-
-@st.cache_data
-def get_relative_volume(ticker, lookback=20):
-    try:
-        data = yf.download(ticker, period="30d", interval="1d", progress=False)
-        if data.empty or "Volume" not in data.columns:
-            return 0
-        vol_series = data["Volume"].dropna()
-        if vol_series.empty:
-            return 0
-        avg_vol = vol_series[-lookback:].mean()
-        latest_vol = vol_series.iloc[-1]
-        if (
-            pd.isna(latest_vol)
-            or pd.isna(avg_vol)
-            or avg_vol == 0
-            or isinstance(latest_vol, pd.Series)
-            or isinstance(avg_vol, pd.Series)
-        ):
-            return 0
-        return latest_vol / avg_vol
-    except:
-        return 0
-
-@st.cache_data
-def get_news(ticker):
-    url = f"https://newsapi.org/v2/everything?q={ticker}&apiKey={NEWS_API_KEY}"
-    try:
-        r = requests.get(url)
-        articles = r.json().get('articles', [])
-        if articles:
-            article = articles[0]
-            return f"[{article['title']}]({article['url']})"
-    except:
-        pass
-    return "N/A"
+def get_news_link(symbol):
+    return f"https://www.google.com/search?q={symbol}+stock+news"
 
 def scan_pro_style():
-    gainers = get_top_gainers()
-    results = []
-    for stock in gainers:
+    gainers = get_gainers()
+    rows = []
+    for g in gainers:
+        sym = g['symbol']
+        profile = get_profile(sym)
+        price = g.get('price', 0)
+        change_pct = g.get('changesPercentage', '').replace('%','').replace('+','').strip()
         try:
-            ticker = stock.get("ticker", "N/A")
-            price = float(stock.get("price", 0))
-            change_pct = float(stock.get("changesPercentage", "0").replace("%", "").replace("+", ""))
-            previous_close = price / (1 + (change_pct / 100))
-            gap_pct = (price - previous_close) / previous_close * 100 if previous_close else 0
+            change_pct = float(change_pct)
+        except:
+            continue
+        vol = g.get('volume', 0)
+        float_m = profile.get('mktCap', 0) / profile.get('volAvg', 1e6) if profile else 0
+        prev_close = profile.get('previousClose', None)
+        gap_pct = None
+        if SHOW_GAP and prev_close and prev_close > 0:
+            try:
+                gap_pct = round(((price - prev_close) / prev_close) * 100, 2)
+            except:
+                gap_pct = None
 
-            if not (PRICE_MIN <= price <= PRICE_MAX) or change_pct < PERCENT_CHANGE_MIN:
-                continue
-            rvol = get_relative_volume(ticker)
-            if rvol < REL_VOL_MIN:
-                continue
-            float_mil = get_float(ticker)
-            if float_mil > FLOAT_MAX:
-                continue
-            news_link = get_news(ticker)
+        rows.append({
+            "Symbol": sym,
+            "Price": price,
+            "% Change": change_pct,
+            "Volume": vol,
+            "Float (M)": round(profile.get("volAvg", 0) / 1e6, 2) if profile else None,
+            "Gap %": gap_pct if SHOW_GAP else None,
+            "News": f"[📰]({get_news_link(sym)})" if SHOW_NEWS else ""
+        })
 
-            results.append({
-                "% Change": round(change_pct, 2),
-                "Gap %": round(gap_pct, 2),
-                "Symbol": ticker,
-                "Price": price,
-                "Float (M)": float_mil,
-                "Relative Volume": round(rvol, 2),
-                "News": news_link,
-                "Time": datetime.now().strftime("%H:%M:%S")
-            })
-        except Exception as e:
-            st.warning(f"Error on {stock.get('ticker')}: {e}")
-    df = pd.DataFrame(results)
-    return df.sort_values("% Change", ascending=False) if not df.empty and "% Change" in df.columns else df
-
-# --- Streamlit UI ---
-st.set_page_config(page_title="Pro Momentum Grid", layout="wide")
-st.title("📊 Pro-Style Momentum Scanner Grid")
+    df = pd.DataFrame(rows)
+    return df
 
 if st.button("🚀 Scan Now"):
     df = scan_pro_style()
-    if not df.empty:
-        st.dataframe(
-            df.style
-              .background_gradient(cmap="Greens", subset=["% Change", "Gap %"])
-              .background_gradient(cmap="Blues", subset=["Float (M)"])
-              .format({"Price": "${:.2f}", "% Change": "{:.2f}%", "Gap %": "{:.2f}%", "Float (M)": "{:.2f}M", "Relative Volume": "{:.2f}"}),
-            use_container_width=True
-        )
-        st.download_button("💾 Export to CSV", df.to_csv(index=False), "momentum_results.csv")
-    else:
+    if df.empty:
         st.info("No qualifying stocks found.")
+    else:
+        df_display = df.dropna(axis=1, how="all")
+        st.dataframe(df_display.sort_values("% Change", ascending=False), use_container_width=True)
