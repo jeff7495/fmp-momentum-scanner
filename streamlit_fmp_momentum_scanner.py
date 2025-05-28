@@ -71,80 +71,50 @@ def get_news(ticker):
         pass
     return None
 
-def scan_and_display():
+def scan_pro_style():
     gainers = get_top_gainers()
-    st.subheader("🔍 Gainers Being Scanned")
-    st.code([g.get("ticker") for g in gainers if "ticker" in g])
-
     results = []
     for stock in gainers:
         try:
             ticker = stock.get("ticker", "N/A")
             price = float(stock.get("price", 0))
             change_pct = float(stock.get("changesPercentage", "0").replace("%", "").replace("+", ""))
-
-            st.write(f"🧪 Checking {ticker}: Price=${price}, Change={change_pct}%")
-
-            if not (PRICE_MIN <= price <= PRICE_MAX):
+            if not (PRICE_MIN <= price <= PRICE_MAX) or change_pct < PERCENT_CHANGE_MIN:
                 continue
-            if change_pct < PERCENT_CHANGE_MIN:
-                continue
-
             rvol = get_relative_volume(ticker)
             if rvol < REL_VOL_MIN:
                 continue
-
             float_mil = get_float(ticker)
             if float_mil > FLOAT_MAX:
                 continue
-
-            headline = get_news(ticker)
-            if not headline:
-                continue
-
+            news = get_news(ticker)
             results.append({
-                "Ticker": ticker,
-                "Price": price,
                 "% Change": round(change_pct, 2),
-                "Relative Volume": round(rvol, 2),
+                "Symbol": ticker,
+                "Price": price,
                 "Float (M)": float_mil,
-                "News Headline": headline,
-                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "Relative Volume": round(rvol, 2),
+                "News": news or "N/A",
+                "Time": datetime.now().strftime("%H:%M:%S")
             })
         except Exception as e:
-            st.warning(f"⚠️ Error with {stock.get('ticker')}: {e}")
+            st.warning(f"Error on {stock.get('ticker')}: {e}")
+    return pd.DataFrame(results).sort_values("% Change", ascending=False)
 
-    return pd.DataFrame(results)
+# --- Streamlit UI ---
+st.set_page_config(page_title="Pro Momentum Grid", layout="wide")
+st.title("📊 Pro-Style Momentum Scanner Grid")
 
-# Streamlit UI
-st.set_page_config(page_title="Momentum Scanner", layout="wide")
-st.title("📘 GUI Momentum Scanner with TradingView Export")
-
-if st.button("Run Scan"):
-    df = scan_and_display()
+if st.button("🚀 Scan Now"):
+    df = scan_pro_style()
     if not df.empty:
-        st.success(f"✅ {len(df)} Stocks Passed Filters")
-
-        for _, row in df.iterrows():
-            with st.container():
-                st.markdown(
-                    f'''
-                    <div style="padding:15px; margin:10px 0; border:1px solid #ccc; border-radius:10px;">
-                        <h3>{row['Ticker']} — ${row['Price']} ({row['% Change']}%)</h3>
-                        <p><strong>RVOL:</strong> {row['Relative Volume']} | <strong>Float:</strong> {row['Float (M)']}M</p>
-                        <p><em>News:</em> {row['News Headline']}</p>
-                        <p><small>{row['Timestamp']}</small></p>
-                    </div>
-                    ''',
-                    unsafe_allow_html=True
-                )
-
-        txt_content = "\n".join(df["Ticker"].tolist())
-        st.download_button(
-            label="📤 Export Watchlist to TradingView (.txt)",
-            data=txt_content,
-            file_name="tv_watchlist.txt",
-            mime="text/plain"
+        st.dataframe(
+            df.style
+              .background_gradient(cmap="Greens", subset=["% Change"])
+              .background_gradient(cmap="Blues", subset=["Float (M)"])
+              .format({"Price": "${:.2f}", "% Change": "{:.2f}%", "Float (M)": "{:.2f}M", "Relative Volume": "{:.2f}"}),
+            use_container_width=True
         )
+        st.download_button("💾 Export to CSV", df.to_csv(index=False), "momentum_results.csv")
     else:
         st.info("No qualifying stocks found.")
