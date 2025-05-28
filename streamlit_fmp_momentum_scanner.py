@@ -27,10 +27,12 @@ def scan_pro_style():
     gainers = get_gainers()
     rows = []
     for g in gainers:
-        sym = g['symbol']
-        profile = get_profile(sym)
-        price = g.get('price', 0)
-        change_pct = g.get('changesPercentage', '').replace('%','').replace('+','').strip()
+    if not isinstance(g, dict):
+        continue  # Skip if g is not a dictionary
+
+    change_pct_raw = g.get('changesPercentage', '')
+    change_pct = str(change_pct_raw).replace('%','').replace('+','').strip()
+
         try:
             change_pct = float(change_pct)
         except:
