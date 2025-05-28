@@ -42,23 +42,28 @@ def get_relative_volume(ticker, lookback=20):
         data = yf.download(ticker, period="30d", interval="1d", progress=False)
         if data.empty or "Volume" not in data.columns:
             return 0
+
         vol_series = data["Volume"].dropna()
+
         if vol_series.empty:
             return 0
+
         avg_vol = vol_series[-lookback:].mean()
         latest_vol = vol_series.iloc[-1]
+
         if (
-    pd.isna(latest_vol)
-    or pd.isna(avg_vol)
-    or avg_vol == 0
-    or isinstance(latest_vol, pd.Series)
-    or isinstance(avg_vol, pd.Series)
-):
-    return 0
+            pd.isna(latest_vol)
+            or pd.isna(avg_vol)
+            or avg_vol == 0
+            or isinstance(latest_vol, pd.Series)
+            or isinstance(avg_vol, pd.Series)
+        ):
+            return 0
 
         return latest_vol / avg_vol
     except:
         return 0
+
 
 @st.cache_data
 def get_news(ticker):
